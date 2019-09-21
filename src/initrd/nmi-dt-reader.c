@@ -115,8 +115,9 @@ nmi_dt_reader_parse (const char *sysfs_dir)
 	gs_unref_object NMConnection *connection = NULL;
 	gs_free char *base = NULL;
 	gs_free char *bootpath = NULL;
-	gs_strfreev char **tokens = NULL;
-	char *path = NULL;
+	gs_free const char **tokens_free = NULL;
+	const char *const*tokens;
+	const char *bootpath_tokens;
 	gboolean bootp = FALSE;
 	const char *s_ipaddr = NULL;
 	const char *s_netmask = NULL;
@@ -147,10 +148,9 @@ nmi_dt_reader_parse (const char *sysfs_dir)
 	c = strchr (bootpath, ':');
 	if (c) {
 		*c = '\0';
-		path = c + 1;
-	} else {
-		path = "";
-	}
+		bootpath_tokens = &c[1];
+	} else
+		bootpath_tokens = NULL;
 
 	dt_get_property (base, "chosen", "client-name", &hostname, NULL);
 
@@ -159,7 +159,9 @@ nmi_dt_reader_parse (const char *sysfs_dir)
 	if (g_strcmp0 (local_hwaddr, hwaddr) == 0)
 		g_clear_pointer (&local_hwaddr, g_free);
 
-	tokens = g_strsplit (path, ",", 0);
+	tokens_free = nm_utils_strsplit_set_with_empty (bootpath_tokens, ",");
+	tokens =    tokens_free
+	         ?: NM_PTRARRAY_EMPTY (const char *);
 
 	/*
 	 * Ethernet device settings. Defined by "Open Firmware,
