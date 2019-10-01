@@ -100,6 +100,7 @@ typedef struct {
 	NMDnsManager *dns_manager;
 	GDBusObjectManager *object_manager;
 	GCancellable *new_object_manager_cancellable;
+	char *name_owner_cached;
 	struct udev *udev;
 	bool udev_inited:1;
 } NMClientPrivate;
@@ -165,6 +166,41 @@ static const GPtrArray empty = { 0, };
  * Returns: the error quark used for #NMClient errors.
  **/
 NM_CACHED_QUARK_FCN ("nm-client-error-quark", nm_client_error_quark)
+
+/*****************************************************************************/
+
+static GDBusConnection *
+_client_get_dbus_connection (NMClient *client)
+{
+	NMClientPrivate *priv;
+
+	nm_assert (NM_IS_CLIENT (client));
+
+	priv = NM_CLIENT_GET_PRIVATE (client);
+
+	if (!priv->object_manager)
+		return NULL;
+
+	return g_dbus_object_manager_client_get_connection (G_DBUS_OBJECT_MANAGER_CLIENT (priv->object_manager));
+}
+
+static const char *
+_client_get_dbus_name_owner (NMClient *client)
+{
+	NMClientPrivate *priv;
+
+	nm_assert (NM_IS_CLIENT (client));
+
+	priv = NM_CLIENT_GET_PRIVATE (client);
+
+	nm_clear_g_free (&priv->name_owner_cached);
+
+	if (!priv->object_manager)
+		return NULL;
+
+	priv->name_owner_cached = g_dbus_object_manager_client_get_name_owner (G_DBUS_OBJECT_MANAGER_CLIENT (priv->object_manager));
+	return priv->name_owner_cached;
+}
 
 /*****************************************************************************/
 
@@ -1436,14 +1472,34 @@ nm_client_deactivate_connection (NMClient *client,
                                  GCancellable *cancellable,
                                  GError **error)
 {
+	gs_unref_variant GVariant *ret = NULL;
+	const char *name_owner;
+	const char *active_path;
+
 	g_return_val_if_fail (NM_IS_CLIENT (client), FALSE);
 	g_return_val_if_fail (NM_IS_ACTIVE_CONNECTION (active), FALSE);
 
-	if (!nm_client_get_nm_running (client))
+	name_owner = _client_get_dbus_name_owner (client);
+	if (!name_owner)
 		return TRUE;
 
-	return nm_manager_deactivate_connection (NM_CLIENT_GET_PRIVATE (client)->manager,
-	                                         active, cancellable, error);
+	active_path = nm_object_get_path (NM_OBJECT (active));
+	g_return_val_if_fail (active_path, FALSE);
+
+	ret = g_dbus_connection_call_sync (_client_get_dbus_connection (client),
+	                                   name_owner,
+	                                   NM_DBUS_PATH,
+	                                   NM_DBUS_INTERFACE,
+	                                   "DeactivateConnection",
+	                                   g_variant_new ("(o)", active_path),
+	                                   G_VARIANT_TYPE ("()"),
+	                                   G_DBUS_CALL_FLAGS_NONE,
+	                                   NM_DBUS_DEFAULT_TIMEOUT_MSEC,
+	                                   cancellable,
+	                                   error);
+	if (error && *error)
+		g_dbus_error_strip_remote_error (*error);
+	return !!ret;
 }
 
 static void
@@ -3454,6 +3510,8 @@ dispose (GObject *object)
 		udev_unref (priv->udev);
 		priv->udev = NULL;
 	}
+
+	nm_clear_g_free (&priv->name_owner_cached);
 }
 
 static void
