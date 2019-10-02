@@ -202,6 +202,14 @@ _client_get_dbus_name_owner (NMClient *client)
 	return priv->name_owner_cached;
 }
 
+static GError *
+_client_error_nm_not_running (void)
+{
+	return g_error_new_literal (NM_CLIENT_ERROR,
+	                            NM_CLIENT_ERROR_MANAGER_NOT_RUNNING,
+	                            "NetworkManager is not running");
+}
+
 /*****************************************************************************/
 
 static void
@@ -212,15 +220,14 @@ nm_client_init (NMClient *client)
 static gboolean
 _nm_client_check_nm_running (NMClient *client, GError **error)
 {
-	if (nm_client_get_nm_running (client))
-		return TRUE;
-	else {
-		g_set_error_literal (error,
-		                     NM_CLIENT_ERROR,
-		                     NM_CLIENT_ERROR_MANAGER_NOT_RUNNING,
-		                     "NetworkManager is not running");
+	if (!nm_client_get_nm_running (client)) {
+		if (error) {
+			g_return_val_if_fail (!*error, FALSE);
+			*error = _client_error_nm_not_running ();
+		}
 		return FALSE;
 	}
+	return TRUE;
 }
 
 /**
@@ -1102,25 +1109,6 @@ nm_client_get_activating_connection (NMClient *client)
 	return nm_manager_get_activating_connection (NM_CLIENT_GET_PRIVATE (client)->manager);
 }
 
-static void
-activate_cb (GObject *object,
-             GAsyncResult *result,
-             gpointer user_data)
-{
-	GSimpleAsyncResult *simple = user_data;
-	NMActiveConnection *ac;
-	GError *error = NULL;
-
-	ac = nm_manager_activate_connection_finish (NM_MANAGER (object), result, &error);
-	if (ac)
-		g_simple_async_result_set_op_res_gpointer (simple, ac, g_object_unref);
-	else
-		g_simple_async_result_take_error (simple, error);
-
-	g_simple_async_result_complete (simple);
-	g_object_unref (simple);
-}
-
 /**
  * nm_client_activate_connection_async:
  * @client: a #NMClient
@@ -1163,27 +1151,28 @@ nm_client_activate_connection_async (NMClient *client,
                                      GAsyncReadyCallback callback,
                                      gpointer user_data)
 {
-	GSimpleAsyncResult *simple;
-	GError *error = NULL;
+	gs_unref_object GTask *task = NULL;
+	const char *name_owner;
 
 	g_return_if_fail (NM_IS_CLIENT (client));
-	if (device)
-		g_return_if_fail (NM_IS_DEVICE (device));
-	if (connection)
-		g_return_if_fail (NM_IS_CONNECTION (connection));
+	g_return_if_fail (!device || NM_IS_DEVICE (device));
+	g_return_if_fail (!connection || NM_IS_CONNECTION (connection));
 
-	if (!_nm_client_check_nm_running (client, &error)) {
-		g_simple_async_report_take_gerror_in_idle (G_OBJECT (client), callback, user_data, error);
+	task = g_task_new (client, cancellable, callback, user_data);
+
+	name_owner = _client_get_dbus_name_owner (client);
+	if (!name_owner) {
+		g_task_return_error (task, _client_error_nm_not_running ());
 		return;
 	}
 
-	simple = g_simple_async_result_new (G_OBJECT (client), callback, user_data,
-	                                    nm_client_activate_connection_async);
-	if (cancellable)
-		g_simple_async_result_set_check_cancellable (simple, cancellable);
 	nm_manager_activate_connection_async (NM_CLIENT_GET_PRIVATE (client)->manager,
-	                                      connection, device, specific_object,
-	                                      cancellable, activate_cb, simple);
+	                                      _client_get_dbus_connection (client),
+	                                      name_owner,
+	                                      connection,
+	                                      device,
+	                                      specific_object,
+	                                      g_steal_pointer (&task));
 }
 
 /**
@@ -1202,16 +1191,10 @@ nm_client_activate_connection_finish (NMClient *client,
                                       GAsyncResult *result,
                                       GError **error)
 {
-	GSimpleAsyncResult *simple;
-
 	g_return_val_if_fail (NM_IS_CLIENT (client), NULL);
-	g_return_val_if_fail (G_IS_SIMPLE_ASYNC_RESULT (result), NULL);
+	g_return_val_if_fail (g_task_is_valid (result, client), NULL);
 
-	simple = G_SIMPLE_ASYNC_RESULT (result);
-	if (g_simple_async_result_propagate_error (simple, error))
-		return NULL;
-	else
-		return g_object_ref (g_simple_async_result_get_op_res_gpointer (simple));
+	return g_task_propagate_pointer (G_TASK (result), error);
 }
 
 static void

@@ -1029,22 +1029,20 @@ activate_cb (GObject *object,
 }
 
 void
-nm_manager_activate_connection_async (NMManager *manager,
+nm_manager_activate_connection_async (NMManager *self,
+                                      GDBusConnection *dbus_connection,
+                                      const char *name_owner,
                                       NMConnection *connection,
                                       NMDevice *device,
                                       const char *specific_object,
-                                      GCancellable *cancellable,
-                                      GAsyncReadyCallback callback,
-                                      gpointer user_data)
+                                      GTask *task)
 {
 	NMManagerPrivate *priv;
 	ActivateInfo *info;
 
-	g_return_if_fail (NM_IS_MANAGER (manager));
-	if (device)
-		g_return_if_fail (NM_IS_DEVICE (device));
-	if (connection)
-		g_return_if_fail (NM_IS_CONNECTION (connection));
+	nm_assert (NM_IS_MANAGER (manager));
+	nm_assert (!device || NM_IS_DEVICE (device));
+	nm_assert (!connection || NM_IS_CONNECTION (connection));
 
 	priv = NM_MANAGER_GET_PRIVATE (manager);
 

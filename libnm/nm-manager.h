@@ -152,16 +152,13 @@ const GPtrArray *nm_manager_get_active_connections (NMManager *manager);
 NMActiveConnection *nm_manager_get_primary_connection (NMManager *manager);
 NMActiveConnection *nm_manager_get_activating_connection (NMManager *manager);
 
-void                nm_manager_activate_connection_async  (NMManager *manager,
-                                                           NMConnection *connection,
-                                                           NMDevice *device,
-                                                           const char *specific_object,
-                                                           GCancellable *cancellable,
-                                                           GAsyncReadyCallback callback,
-                                                           gpointer user_data);
-NMActiveConnection *nm_manager_activate_connection_finish (NMManager *manager,
-                                                           GAsyncResult *result,
-                                                           GError **error);
+void nm_manager_activate_connection_async (NMManager *self,
+                                           GDBusConnection *dbus_connection,
+                                           const char *name_owner,
+                                           NMConnection *connection,
+                                           NMDevice *device,
+                                           const char *specific_object,
+                                           GTask *task);
 
 void                nm_manager_add_and_activate_connection_async  (NMManager *manager,
                                                                    NMConnection *partial,
