@@ -1153,10 +1153,21 @@ nm_client_activate_connection_async (NMClient *client,
 {
 	gs_unref_object GTask *task = NULL;
 	const char *name_owner;
+	const char *arg_connection = NULL;
 
 	g_return_if_fail (NM_IS_CLIENT (client));
-	g_return_if_fail (!device || NM_IS_DEVICE (device));
-	g_return_if_fail (!connection || NM_IS_CONNECTION (connection));
+
+	if (connection) {
+		g_return_if_fail (NM_IS_CONNECTION (connection));
+		arg_connection = nm_connection_get_path (connection);
+		g_return_if_fail (arg_connection);
+	}
+
+	if (device) {
+		g_return_if_fail (NM_IS_DEVICE (device));
+		arg_device = nm_object_get_path (NM_OBJECT (device));
+		g_return_if_fail (arg_device);
+	}
 
 	task = g_task_new (client, cancellable, callback, user_data);
 
@@ -1166,13 +1177,21 @@ nm_client_activate_connection_async (NMClient *client,
 		return;
 	}
 
-	nm_manager_activate_connection_async (NM_CLIENT_GET_PRIVATE (client)->manager,
-	                                      _client_get_dbus_connection (client),
-	                                      name_owner,
-	                                      connection,
-	                                      device,
-	                                      specific_object,
-	                                      g_steal_pointer (&task));
+	g_dbus_connection_call (_client_get_dbus_connection (client),
+	                        name_owner,
+	                        NM_DBUS_PATH,
+	                        NM_DBUS_INTERFACE,
+	                        "ActivateConnection",
+	                        g_variant_new ("(ooo)",
+	                                       arg_connection,
+	                                       arg_device,
+	                                       specific_object ?: "/"),
+	                        G_VARIANT_TYPE ("(o)"),
+	                        G_DBUS_CALL_FLAGS_NONE,
+	                        NM_DBUS_DEFAULT_TIMEOUT_MSEC,
+	                        cancellable,
+	                        activate_cb,
+	                        g_steal_pointer (&task));
 }
 
 /**
